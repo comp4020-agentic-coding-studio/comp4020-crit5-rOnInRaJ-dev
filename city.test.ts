@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsPoint, GROUND_Y, initialCity } from "./city.ts";
+import { containsFlyerPoint, containsPoint, GROUND_Y, initialCity, initialFlyers } from "./city.ts";
 import type { Building } from "./types.ts";
 
 // The attachment rule: a rope lands anywhere on a building face, and nowhere
@@ -46,5 +46,30 @@ describe("initialCity", () => {
     for (let i = 1; i < city.length; i++) {
       expect(city[i].x).toBeGreaterThan(city[i - 1].x + city[i - 1].width);
     }
+  });
+});
+
+describe("initialFlyers", () => {
+  it("places every flyer above the ground, high in the sky", () => {
+    for (const flyer of initialFlyers()) {
+      expect(flyer.y).toBeLessThan(GROUND_Y - 1000);
+    }
+  });
+
+  it("leaves a gap between every flyer", () => {
+    const flyers = initialFlyers();
+    for (let i = 1; i < flyers.length; i++) {
+      expect(flyers[i].x).toBeGreaterThan(flyers[i - 1].x + flyers[i - 1].width);
+    }
+  });
+});
+
+describe("containsFlyerPoint", () => {
+  const flyer = { x: 100, y: -2000, width: 200, height: 100, kind: "plane" as const };
+
+  it("accepts a point in the middle and rejects points outside the box", () => {
+    expect(containsFlyerPoint(flyer, { x: 200, y: -2000 })).toBe(true);
+    expect(containsFlyerPoint(flyer, { x: 99, y: -2000 })).toBe(false);
+    expect(containsFlyerPoint(flyer, { x: 200, y: -1949 })).toBe(false);
   });
 });

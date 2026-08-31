@@ -13,3 +13,13 @@ export interface Building {
 }
 
 export type GameStatus = "running" | "game-over";
+
+// A plane or blimp hanging high above the skyline — another rope anchor,
+// just one that lives above the buildings instead of among them.
+export interface Flyer {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  kind: "plane" | "blimp";
+}

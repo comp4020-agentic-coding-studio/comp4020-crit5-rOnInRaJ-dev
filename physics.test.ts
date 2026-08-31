@@ -78,6 +78,72 @@ describe("Chain constraint", () => {
   });
 });
 
+describe("Rope reel", () => {
+  it("scales tangential speed by r/r\', the skater-pulling-arms-in effect", () => {
+    const hand = new Particle(0, 200); // hanging straight below the anchor
+    hand.setVelocity(200, 0); // moving purely sideways: all tangential
+    const chain = new Chain();
+    chain.attach({ x: 0, y: 0 }, hand.pos);
+
+    const before = chain.maxLength;
+    chain.reel(hand, PHYSICS_STEP);
+
+    expect(chain.maxLength).toBeLessThan(before);
+    expect(hand.velocity.x).toBeCloseTo(200 * (before / chain.maxLength), 4);
+  });
+
+  it("does nothing while the rope is still slack — reeling in air is free", () => {
+    const hand = new Particle(0, 50); // well inside a 400 rope
+    hand.setVelocity(200, 0);
+    const chain = new Chain();
+    chain.attach({ x: 0, y: 0 }, { x: 0, y: 400 });
+
+    chain.reel(hand, PHYSICS_STEP);
+
+    expect(hand.velocity.x).toBeCloseTo(200, 6);
+  });
+
+  it("raises the peak speed of a swing when reeled at the bottom of the arc", () => {
+    // Reeling only pays where the rope is taut and the body is fast, which is
+    // the bottom. Peak speed over the run is the honest measure: a shorter
+    // rope also has less height to fall, so comparing a fixed instant would
+    // compare two different pendulums instead of the pump.
+    function peakSpeed(reel: boolean): number {
+      const hand = new Particle(0, 400);
+      hand.setVelocity(300, 0);
+      const chain = new Chain();
+      chain.attach({ x: 0, y: 0 }, hand.pos);
+
+      let peak = 0;
+      for (let step = 0; step < 240; step++) {
+        // Only while it's still near the bottom and moving, as a player would.
+        if (reel && step < 40) chain.reel(hand, PHYSICS_STEP);
+        hand.integrate();
+        for (let i = 0; i < SOLVER_ITERATIONS; i++) chain.constrain(hand);
+        const v = hand.velocity;
+        peak = Math.max(peak, Math.hypot(v.x, v.y));
+      }
+      return peak;
+    }
+
+    expect(peakSpeed(true)).toBeGreaterThan(peakSpeed(false));
+  });
+
+  it("never reels down to zero, which would pin the body on the anchor", () => {
+    const chain = new Chain();
+    const hand = new Particle(400, 0);
+    chain.attach({ x: 0, y: 0 }, hand.pos);
+    for (let i = 0; i < 2000; i++) chain.reel(hand, PHYSICS_STEP);
+    expect(chain.maxLength).toBeGreaterThan(0);
+  });
+
+  it("does nothing with no rope out", () => {
+    const chain = new Chain();
+    chain.reel(new Particle(0, 0), PHYSICS_STEP);
+    expect(chain.maxLength).toBe(0);
+  });
+});
+
 describe("Ragdoll under rope tension", () => {
   it("drags the whole body toward the anchor, not just the roped hand", () => {
     const ragdoll = new Ragdoll(0, 0);

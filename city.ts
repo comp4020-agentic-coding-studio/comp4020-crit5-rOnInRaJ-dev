@@ -1,14 +1,14 @@
-import type { Building, Vector2 } from "./types.ts";
+import type { Building, Flyer, Vector2 } from "./types.ts";
 
 export const GROUND_Y = 600;
 
 // World scale: the ragdoll stands ~62px tall, so ~34px is roughly a metre.
-// Buildings are sized in that scale — 5 to 15 storeys — which is why they
+// Buildings are sized in that scale — 5 to 20 storeys — which is why they
 // dwarf the player instead of being hoppable blocks.
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 620;
 const MIN_HEIGHT = 520;
-const MAX_HEIGHT = 1600;
+const MAX_HEIGHT = 2200;
 const MIN_GAP = 260;
 const MAX_GAP = 620;
 
@@ -64,6 +64,86 @@ export function initialCity(): Building[] {
 // the current rightmost edge that another building should exist.
 export function generateNextBuilding(rightEdge: number): Building {
   return randomBuilding(rightEdge + randomBetween(MIN_GAP, MAX_GAP));
+}
+
+// Planes and blimps: rope anchors that live above the skyline instead of in
+// it. Sparser than buildings — they're a occasional high-altitude grab, not
+// the main route through.
+const FLYER_MIN_GAP = 1400;
+const FLYER_MAX_GAP = 2600;
+const FLYER_MIN_Y = -2600; // higher up (more negative) than the tallest towers
+const FLYER_MAX_Y = -1700;
+const PLANE_SIZE = { width: 220, height: 70 };
+const BLIMP_SIZE = { width: 260, height: 110 };
+
+function randomFlyer(x: number): Flyer {
+  const kind = Math.random() < 0.5 ? "plane" : "blimp";
+  const size = kind === "plane" ? PLANE_SIZE : BLIMP_SIZE;
+  return { x, y: randomBetween(FLYER_MIN_Y, FLYER_MAX_Y), kind, ...size };
+}
+
+export function initialFlyers(): Flyer[] {
+  const flyers: Flyer[] = [];
+  let x = randomBetween(FLYER_MIN_GAP, FLYER_MAX_GAP);
+  for (let i = 0; i < 4; i++) {
+    flyers.push(randomFlyer(x));
+    x += randomBetween(FLYER_MIN_GAP, FLYER_MAX_GAP);
+  }
+  return flyers;
+}
+
+export function generateNextFlyer(rightEdge: number): Flyer {
+  return randomFlyer(rightEdge + randomBetween(FLYER_MIN_GAP, FLYER_MAX_GAP));
+}
+
+// Same facade-hit rule as containsPoint, just centered on y instead of
+// resting on the ground.
+export function containsFlyerPoint(flyer: Flyer, point: Vector2): boolean {
+  return (
+    point.x >= flyer.x &&
+    point.x <= flyer.x + flyer.width &&
+    point.y >= flyer.y - flyer.height / 2 &&
+    point.y <= flyer.y + flyer.height / 2
+  );
+}
+
+export function drawFlyer(ctx: CanvasRenderingContext2D, flyer: Flyer, camX: number, camY: number) {
+  const x = flyer.x - camX;
+  const y = flyer.y - camY;
+  const w = flyer.width;
+  const h = flyer.height;
+
+  if (flyer.kind === "blimp") {
+    ctx.fillStyle = "#c9d3de";
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#8fa0b3";
+    ctx.fillRect(x + w * 0.35, y + h * 0.25, w * 0.3, h * 0.22); // gondola
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = "#e2e6ea";
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y, w / 2, h / 4, 0, 0, Math.PI * 2); // fuselage
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.4, y);
+    ctx.lineTo(x + w * 0.55, y - h * 0.55); // tail fin up
+    ctx.lineTo(x + w * 0.65, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.45, y);
+    ctx.lineTo(x + w * 0.3, y + h * 0.5); // wing down
+    ctx.lineTo(x + w * 0.6, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
 }
 
 // Deterministic 0..1 noise. Buildings are generated randomly but drawn every

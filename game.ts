@@ -1,20 +1,24 @@
 import { Camera } from "./camera.ts";
 import { Chain } from "./chain.ts";
 import {
+  containsFlyerPoint,
   containsPoint,
   drawBackdrop,
   drawGroundHaze,
   drawStreetLamps,
   drawBuilding,
+  drawFlyer,
   generateNextBuilding,
+  generateNextFlyer,
   GROUND_Y,
   initialCity,
+  initialFlyers,
 } from "./city.ts";
 import { boostChime, ropeShot, setSpeed, stopWind } from "./audio.ts";
 import { PHYSICS_STEP, Ragdoll, SOLVER_ITERATIONS } from "./ragdoll.ts";
 import { ScoreTracker } from "./score.ts";
 import { BOOST_VX, BOOST_VY, Tokens } from "./tokens.ts";
-import type { Building, GameStatus, Vector2 } from "./types.ts";
+import type { Building, Flyer, GameStatus, Vector2 } from "./types.ts";
 
 // Spawn high and left of the first building, so the bullseye is inside REACH
 // for the whole opening fall — the player gets the full descent to work out
@@ -39,9 +43,11 @@ export class Game {
   score = new ScoreTracker();
   tokens = new Tokens();
   buildings: Building[] = initialCity();
+  flyers: Flyer[] = initialFlyers();
   // Held by the player: shorten the rope, pumping energy into the swing.
   reeling = false;
   private rightmostX: number;
+  private rightmostFlyerX: number;
   private accumulator = 0;
   private elapsed = 0;
 
@@ -51,6 +57,7 @@ export class Game {
   ) {
     this.score.reset(this.ragdoll.pos.x);
     this.rightmostX = rightEdge(this.buildings);
+    this.rightmostFlyerX = rightEdge(this.flyers);
   }
 
   reset() {
@@ -58,7 +65,9 @@ export class Game {
     this.ragdoll.reset(START.x, START.y, START.vx, START.vy);
     this.chain.detach();
     this.buildings = initialCity();
+    this.flyers = initialFlyers();
     this.rightmostX = rightEdge(this.buildings);
+    this.rightmostFlyerX = rightEdge(this.flyers);
     this.score.reset(this.ragdoll.pos.x);
     this.tokens.reset();
     this.reeling = false;
@@ -66,14 +75,16 @@ export class Game {
     this.elapsed = 0;
   }
 
-  // Mouse down: fire a rope at whatever building surface is under the
-  // cursor. Any point on any facade works — the only limits are that the
-  // click has to land on a building and be within reach of the hands.
+  // Mouse down: fire a rope at whatever building or flyer surface is under
+  // the cursor. Any point on any facade works — the only limits are that the
+  // click has to land on something and be within reach of the hands.
   tryShoot(pointerWorld: Vector2) {
     if (this.status !== "running") return;
     const hand = this.ragdoll.handWorldPos();
     if (Math.hypot(pointerWorld.x - hand.x, pointerWorld.y - hand.y) > REACH) return;
-    const hit = this.buildings.find((building) => containsPoint(building, pointerWorld));
+    const hit =
+      this.buildings.some((building) => containsPoint(building, pointerWorld)) ||
+      this.flyers.some((flyer) => containsFlyerPoint(flyer, pointerWorld));
     if (!hit) return;
     this.chain.attach({ ...pointerWorld }, hand);
     ropeShot();
@@ -103,7 +114,7 @@ export class Game {
   }
 
   private step() {
-    if (this.reeling) this.chain.reel(PHYSICS_STEP);
+    if (this.reeling) this.chain.reel(this.ragdoll.hand, PHYSICS_STEP);
     this.ragdoll.integrate();
 
     // Bones and rope are solved together, over and over: the rope is just one
@@ -140,28 +151,42 @@ export class Game {
       this.rightmostX = next.x + next.width;
     }
     this.buildings = this.buildings.filter((b) => b.x + b.width > this.ragdoll.pos.x - CULL_MARGIN);
+
+    while (this.rightmostFlyerX < this.ragdoll.pos.x + SPAWN_MARGIN) {
+      const next = generateNextFlyer(this.rightmostFlyerX);
+      this.flyers.push(next);
+      this.rightmostFlyerX = next.x + next.width;
+    }
+    this.flyers = this.flyers.filter((f) => f.x + f.width > this.ragdoll.pos.x - CULL_MARGIN);
   }
 
   render(ctx: CanvasRenderingContext2D, width: number, height: number) {
-    this.camera.follow(this.ragdoll.pos, width, height);
+    const zoom = this.camera.zoom;
+    const viewWidth = width / zoom;
+    const viewHeight = height / zoom;
+    this.camera.follow(this.ragdoll.pos, viewWidth, viewHeight);
     const { x: camX, y: camY } = this.camera;
 
-    drawBackdrop(ctx, camX, camY, width, height);
+    ctx.save();
+    ctx.scale(zoom, zoom);
+
+    drawBackdrop(ctx, camX, camY, viewWidth, viewHeight);
 
     const groundScreenY = GROUND_Y - camY;
     ctx.fillStyle = "#232b33";
-    ctx.fillRect(0, groundScreenY, width, Math.max(0, height - groundScreenY));
+    ctx.fillRect(0, groundScreenY, viewWidth, Math.max(0, viewHeight - groundScreenY));
     ctx.strokeStyle = "#0d1117";
     ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(0, groundScreenY);
-    ctx.lineTo(width, groundScreenY);
+    ctx.lineTo(viewWidth, groundScreenY);
     ctx.stroke();
 
-    for (const b of this.buildings) drawBuilding(ctx, b, camX, camY, width, height);
-    drawStreetLamps(ctx, camX, camY, width, height);
-    drawGroundHaze(ctx, camY, width);
-    this.tokens.draw(ctx, camX, camY, width, this.elapsed);
+    for (const f of this.flyers) drawFlyer(ctx, f, camX, camY);
+    for (const b of this.buildings) drawBuilding(ctx, b, camX, camY, viewWidth, viewHeight);
+    drawStreetLamps(ctx, camX, camY, viewWidth, viewHeight);
+    drawGroundHaze(ctx, camY, viewWidth);
+    this.tokens.draw(ctx, camX, camY, viewWidth, this.elapsed);
 
     if (this.chain.anchor) {
       const hand = this.ragdoll.handWorldPos();
@@ -174,9 +199,10 @@ export class Game {
     }
 
     this.ragdoll.draw(ctx, camX, camY);
+    ctx.restore();
   }
 }
 
-function rightEdge(buildings: Building[]): number {
-  return Math.max(...buildings.map((b) => b.x + b.width));
+function rightEdge(items: { x: number; width: number }[]): number {
+  return Math.max(...items.map((b) => b.x + b.width));
 }
