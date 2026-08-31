@@ -60,11 +60,40 @@ main {
   position: absolute;
   top: 0.75rem;
   right: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
   font: 600 1.15rem/1 system-ui, sans-serif;
   color: #fff;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
   z-index: 2;
   pointer-events: none;
+}
+
+#best {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #9db4d0;
+}
+
+/* Fades out once the player has actually swung — see main.ts. */
+#hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 0.85rem;
+  color: #cfe0f0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  transition: opacity 0.6s;
+  z-index: 2;
+  pointer-events: none;
+}
+
+#hint.gone {
+  opacity: 0;
 }
 
 #game-over {
@@ -93,6 +122,12 @@ main {
 #final-score {
   margin: 0;
   font-size: 1.1rem;
+}
+
+#best-score {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #9db4d0;
 }
 
 #game-over button {

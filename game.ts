@@ -2,13 +2,18 @@ import { Camera } from "./camera.ts";
 import { Chain } from "./chain.ts";
 import {
   containsPoint,
+  drawBackdrop,
+  drawGroundHaze,
+  drawStreetLamps,
   drawBuilding,
   generateNextBuilding,
   GROUND_Y,
   initialCity,
 } from "./city.ts";
-import { FOOT_OFFSET, Ragdoll } from "./ragdoll.ts";
+import { boostChime, ropeShot, setSpeed, stopWind } from "./audio.ts";
+import { PHYSICS_STEP, Ragdoll, SOLVER_ITERATIONS } from "./ragdoll.ts";
 import { ScoreTracker } from "./score.ts";
+import { BOOST_VX, BOOST_VY, Tokens } from "./tokens.ts";
 import type { Building, GameStatus, Vector2 } from "./types.ts";
 
 // Spawn high and left of the first building, so the bullseye is inside REACH
@@ -20,6 +25,11 @@ const REACH = 1200; // how far a rope can be shot from the ragdoll's hands
 // viewport width) or buildings get culled while still on screen.
 const CULL_MARGIN = 2000;
 const SPAWN_MARGIN = REACH * 2; // keep the city generated this far ahead
+// main.ts already clamps a frame to 1/30s, so 4 steps covers it with headroom.
+const MAX_STEPS_PER_FRAME = 8;
+// How close the pelvis has to get to a token's centre to eat it. Generous —
+// missing a pickup you clearly flew through is worse than a cheap one.
+const PICKUP_RADIUS = 34;
 
 export class Game {
   status: GameStatus = "running";
@@ -27,8 +37,13 @@ export class Game {
   chain = new Chain();
   camera = new Camera();
   score = new ScoreTracker();
+  tokens = new Tokens();
   buildings: Building[] = initialCity();
+  // Held by the player: shorten the rope, pumping energy into the swing.
+  reeling = false;
   private rightmostX: number;
+  private accumulator = 0;
+  private elapsed = 0;
 
   constructor(
     private readonly onScore: (distance: number) => void,
@@ -45,9 +60,13 @@ export class Game {
     this.buildings = initialCity();
     this.rightmostX = rightEdge(this.buildings);
     this.score.reset(this.ragdoll.pos.x);
+    this.tokens.reset();
+    this.reeling = false;
+    this.accumulator = 0;
+    this.elapsed = 0;
   }
 
-  // Right-click down: fire a rope at whatever building surface is under the
+  // Mouse down: fire a rope at whatever building surface is under the
   // cursor. Any point on any facade works — the only limits are that the
   // click has to land on a building and be within reach of the hands.
   tryShoot(pointerWorld: Vector2) {
@@ -57,23 +76,59 @@ export class Game {
     const hit = this.buildings.find((building) => containsPoint(building, pointerWorld));
     if (!hit) return;
     this.chain.attach({ ...pointerWorld }, hand);
+    ropeShot();
   }
 
   releaseShoot() {
     this.chain.detach();
   }
 
+  // Real frame time in, fixed physics steps out. Verlet needs a constant dt,
+  // and a frame drop must slow the sim rather than destabilise it.
   update(dt: number) {
+    this.accumulator += dt;
+    let steps = 0;
+    while (this.accumulator >= PHYSICS_STEP && steps < MAX_STEPS_PER_FRAME) {
+      this.step();
+      this.accumulator -= PHYSICS_STEP;
+      steps++;
+    }
+    // After a long stall, drop the backlog instead of chasing it forever.
+    if (steps === MAX_STEPS_PER_FRAME) this.accumulator = 0;
+
+    this.elapsed += dt;
+    const v = this.ragdoll.velocity;
+    if (this.status === "running") setSpeed(Math.hypot(v.x, v.y));
+    else stopWind();
+  }
+
+  private step() {
+    if (this.reeling) this.chain.reel(PHYSICS_STEP);
+    this.ragdoll.integrate();
+
+    // Bones and rope are solved together, over and over: the rope is just one
+    // more constraint, so tension propagates hand -> arm -> torso -> legs.
+    for (let i = 0; i < SOLVER_ITERATIONS; i++) {
+      this.ragdoll.solveSticks();
+      this.chain.constrain(this.ragdoll.hand);
+    }
+
+    this.ragdoll.collideGround(GROUND_Y);
+
+    // Past game over the body keeps simulating so it visibly crumples on the
+    // road, but nothing else in the world advances.
     if (this.status !== "running") return;
 
-    this.ragdoll.integrate(dt);
-    this.chain.constrain(this.ragdoll);
-
-    if (this.ragdoll.pos.y + FOOT_OFFSET >= GROUND_Y) {
+    if (this.ragdoll.lowestY() >= GROUND_Y) {
       this.status = "game-over";
       this.chain.detach();
       this.onGameOver(this.score.distance);
       return;
+    }
+
+    if (this.tokens.collect(this.ragdoll.pos, PICKUP_RADIUS) > 0) {
+      this.ragdoll.addImpulse(BOOST_VX, BOOST_VY);
+      boostChime();
     }
 
     this.score.update(this.ragdoll.pos.x);
@@ -91,7 +146,7 @@ export class Game {
     this.camera.follow(this.ragdoll.pos, width, height);
     const { x: camX, y: camY } = this.camera;
 
-    ctx.clearRect(0, 0, width, height);
+    drawBackdrop(ctx, camX, camY, width, height);
 
     const groundScreenY = GROUND_Y - camY;
     ctx.fillStyle = "#232b33";
@@ -103,7 +158,10 @@ export class Game {
     ctx.lineTo(width, groundScreenY);
     ctx.stroke();
 
-    for (const b of this.buildings) drawBuilding(ctx, b, camX, camY);
+    for (const b of this.buildings) drawBuilding(ctx, b, camX, camY, width, height);
+    drawStreetLamps(ctx, camX, camY, width, height);
+    drawGroundHaze(ctx, camY, width);
+    this.tokens.draw(ctx, camX, camY, width, this.elapsed);
 
     if (this.chain.anchor) {
       const hand = this.ragdoll.handWorldPos();
@@ -115,7 +173,7 @@ export class Game {
       ctx.stroke();
     }
 
-    this.ragdoll.draw(ctx, this.ragdoll.pos.x - camX, this.ragdoll.pos.y - camY);
+    this.ragdoll.draw(ctx, camX, camY);
   }
 }
 

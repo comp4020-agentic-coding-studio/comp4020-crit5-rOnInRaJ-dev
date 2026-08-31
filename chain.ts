@@ -1,13 +1,25 @@
-import type { Ragdoll } from "./ragdoll.ts";
+import type { Particle } from "./ragdoll.ts";
 import type { Vector2 } from "./types.ts";
 
-function distance(a: Vector2, b: Vector2): number {
-  return Math.hypot(a.x - b.x, a.y - b.y);
-}
+// Grabbing a surface you're already touching would otherwise pin the hand at
+// zero length and snap the body into the wall.
+const MIN_LENGTH = 40;
 
-// A chain, not a rod: slack inside max length applies no force at all; only
-// once taut does it clamp position and kill the outward velocity component,
-// leaving the tangential (swinging) component untouched.
+// How fast holding reel shortens the rope, in px/s. This is the energy pump:
+// the clamp moves `pos` inward without touching `prev`, so every reeled pixel
+// becomes inward velocity that the swing converts into speed at the bottom of
+// the arc — the same trick as pulling your legs in on a playground swing.
+const REEL_SPEED = 520;
+
+/**
+ * A chain, not a rod: slack inside max length applies no force at all, and
+ * going taut clamps the hand back to max length.
+ *
+ * Under Verlet that clamp is the entire physics. Velocity is the gap between
+ * `pos` and `prev`, so pulling `pos` back toward the anchor without touching
+ * `prev` removes exactly the outward motion that overshot — and leaves the
+ * tangential component alone, which is what keeps the swing alive.
+ */
 export class Chain {
   anchor: Vector2 | null = null;
   maxLength = 0;
@@ -16,9 +28,19 @@ export class Chain {
     return this.anchor !== null;
   }
 
-  attach(anchor: Vector2, ragdollHand: Vector2) {
+  attach(anchor: Vector2, hand: Vector2) {
     this.anchor = anchor;
-    this.maxLength = distance(anchor, ragdollHand);
+    this.maxLength = Math.max(MIN_LENGTH, Math.hypot(anchor.x - hand.x, anchor.y - hand.y));
+  }
+
+  /**
+   * Shorten the rope while the player holds reel. Slack gets taken up first
+   * (free), and once taut this is doing real work on the body — which is the
+   * point: a swing that only ever clamps bleeds energy and dies.
+   */
+  reel(dt: number) {
+    if (!this.anchor) return;
+    this.maxLength = Math.max(MIN_LENGTH, this.maxLength - REEL_SPEED * dt);
   }
 
   detach() {
@@ -26,27 +48,15 @@ export class Chain {
     this.maxLength = 0;
   }
 
-  constrain(ragdoll: Ragdoll) {
+  constrain(hand: Particle) {
     if (!this.anchor) return;
-    const hand = ragdoll.handWorldPos();
-    const dx = hand.x - this.anchor.x;
-    const dy = hand.y - this.anchor.y;
+    const dx = hand.pos.x - this.anchor.x;
+    const dy = hand.pos.y - this.anchor.y;
     const dist = Math.hypot(dx, dy);
     if (dist <= this.maxLength || dist === 0) return; // slack: no force
 
-    const nx = dx / dist;
-    const ny = dy / dist;
-    const clampedHandX = this.anchor.x + nx * this.maxLength;
-    const clampedHandY = this.anchor.y + ny * this.maxLength;
-    // Translate the whole ragdoll by the same delta as the hand, since the
-    // hand is a fixed offset from its position.
-    ragdoll.pos.x += clampedHandX - hand.x;
-    ragdoll.pos.y += clampedHandY - hand.y;
-
-    const radialSpeed = ragdoll.vel.x * nx + ragdoll.vel.y * ny;
-    if (radialSpeed > 0) {
-      ragdoll.vel.x -= radialSpeed * nx;
-      ragdoll.vel.y -= radialSpeed * ny;
-    }
+    const scale = this.maxLength / dist;
+    hand.pos.x = this.anchor.x + dx * scale;
+    hand.pos.y = this.anchor.y + dy * scale;
   }
 }

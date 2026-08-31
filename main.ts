@@ -45,13 +45,13 @@ function restart() {
 
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
+// Either mouse button shoots a rope — left is what people reach for first,
+// right still works because the context menu is suppressed above.
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button !== 2) return;
   game.tryShoot(screenToWorld(e.clientX, e.clientY));
 });
 
-window.addEventListener("mouseup", (e) => {
-  if (e.button !== 2) return;
+window.addEventListener("mouseup", () => {
   game.releaseShoot();
 });
 
