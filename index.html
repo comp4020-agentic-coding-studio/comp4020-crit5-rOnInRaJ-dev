@@ -3,17 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <title>Rooftop Swing</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="A 2D web-swinging game: shoot a rope from your hands to a rooftop and swing across the city without touching the ground."
     />
 
-    <!--
-      The link-preview card: public/card.png, 1200x630 --- replace it. The URL
-      resolves against this page, like any link. No og:title/og:description:
-      scrapers fall back to the <title> and description above.
-    -->
     <meta property="og:type" content="website" />
     <meta property="og:image" content="./card.png" />
     <meta name="twitter:card" content="summary_large_image" />
@@ -27,11 +22,16 @@
       </nav>
     </header>
     <main>
-      <h1>COMP4020 prototype</h1>
-      <p>
-        Replace this with your prototype. This week's brief is on the course website;
-        <code>spec/README.md</code> explains how the checks in this repo relate to it.
-      </p>
+      <h1 class="visually-hidden">Rooftop Swing</h1>
+      <div id="game">
+        <canvas id="stage"></canvas>
+        <div id="hud">0 m</div>
+        <div id="game-over" hidden>
+          <p class="game-over-title">Game over</p>
+          <p id="final-score">0 m</p>
+          <button id="restart" type="button">Restart</button>
+        </div>
+      </div>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>
